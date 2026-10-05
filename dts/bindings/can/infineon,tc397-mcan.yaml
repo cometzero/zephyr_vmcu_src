@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+description: TC397 CAN0 node0 functional M_CAN integration
+compatible: "infineon,tc397-mcan"
+include: ["bosch,m_can-base.yaml"]
+properties:
+  reg:
+    required: true
+  reg-names:
+    required: true
+  interrupts:
+    required: true
+  interrupt-names:
+    required: true
+  clock-frequency:
+    type: int
+    required: true

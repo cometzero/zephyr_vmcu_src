@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+mainmenu "Apollo TC397 vMCU"
+# NUM_IRQS counts SRC entries, not the 256 CPU priority vectors.
+config NUM_IRQS
+    default 512 if SOC_QEMU_TC3X
+config CAN_TC397
+    bool "TC397 CAN0 node0"
+    default y
+    depends on CAN
+    select CAN_MCAN
+source "Kconfig.zephyr"

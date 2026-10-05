@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* CPU0, memory, STM0 and polling ASCLIN driver come from upstream qemu_tc3x. */
+/ {
+	aliases {
+		vmcu-link = &asclin0;
+		vmcu-safety = &asclin2;
+		vmcu-port = &port0;
+		vmcu-can = &can0;
+	};
+	chosen {
+		zephyr,console = &asclin1;
+		zephyr,shell-uart = &asclin1;
+	};
+	soc {
+		can0: can@f0208200 {
+			compatible = "infineon,tc397-mcan";
+			reg = <0xf0208200 0x100>, <0xf0200000 0x8000>,
+			      <0xf0208000 0x100>, <0xf0208100 0x100>;
+			reg-names = "m_can", "message_ram", "common", "node";
+			interrupts = <0x16c 13>, <0x16d 14>;
+			interrupt-names = "int0", "int1";
+			clock-frequency = <100000000>;
+			bitrate = <500000>;
+			bitrate-data = <2000000>;
+			bosch,mram-cfg = <0 8 4 8 0 0 8 8>;
+			status = "okay";
+		};
+		asclin2: asclin@f0000800 {
+			compatible = "infineon,asclin-uart";
+			reg = <0xf0000800 0x100>;
+			clock-frequency = <100000000>;
+			current-speed = <115200>;
+			status = "okay";
+		};
+		/* Register-level TC397 PORT0 subset; no alternate-function/IRQ claims. */
+		port0: gpio@f003a000 {
+			compatible = "infineon,tc397-port";
+			reg = <0xf003a000 0x100>;
+			status = "okay";
+		};
+		asclin1: asclin@f0000700 {
+			compatible = "infineon,asclin-uart";
+			reg = <0xf0000700 0x100>;
+			clock-frequency = <100000000>;
+			current-speed = <115200>;
+			status = "okay";
+		};
+	};
+};
+
+&asclin0 {
+	current-speed = <115200>;
+	status = "okay";
+};
