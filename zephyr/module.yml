@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 name: zephyr_vmcu_src
 build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
   settings:
+    arch_root: .
+    soc_root: .
+    board_root: .
     dts_root: .

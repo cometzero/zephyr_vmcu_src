@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+rsource "../drivers/serial/Kconfig.infineon_aurix"
+rsource "../drivers/timer/Kconfig.infineon_aurix_stm"
+rsource "../drivers/interrupt_controller/Kconfig.infineon_aurix"

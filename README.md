@@ -2,7 +2,7 @@
 
 Apollo 외부 Vehicle MCU의 Zephyr application과 out-of-tree DTS overlay다.
 TC397 CPU0에서 Zephyr kernel, shell, UART monitor를 실행한다. Safety Island용
-`../zephyr`와 `../zephyr_hsoc_src`는 별도 구성으로 유지한다.
+`../zephyr` 4.1 소스를 공유하고 `../zephyr_hsoc_src`와 같은 module overlay 구조를 사용한다.
 
 ## 빌드와 실행
 
@@ -11,12 +11,10 @@ TC397 CPU0에서 Zephyr kernel, shell, UART monitor를 실행한다. Safety Isla
 아래 명령은 Apollo workspace root에서 실행한다.
 
 ```sh
-# 최초: 고정된 Zephyr/GCC와 Python build dependency 준비
-scripts/build/build_vmcu_zephyr.sh --bootstrap
-# 이후 증분 firmware build
-scripts/build/build_vmcu_zephyr.sh
-# AP UART service가 포함된 BSP image
+# vMCU firmware, TC397 QEMU, AP service를 포함한 BSP 빌드
 ./yocto_build.sh --bsp
+# firmware만 증분 빌드
+./yocto_build.sh zephyr-vmcu
 # TC397 Zephyr와 Apollo BSP를 같은 tmux 화면에서 실행
 ./run_qbox_yocto.sh --bsp
 # 차량 CAN/CAN FD와 SIL Kit restbus 연결
@@ -24,12 +22,13 @@ scripts/build/build_vmcu_silkit.sh --bootstrap
 ./run_qbox_yocto.sh --bsp --sil-kit
 ```
 
-기본 ELF는 `build/qbox-apollo-qvp/zephyr-vmcu/app/zephyr/zephyr.elf`다.
-`--bootstrap`은 build 아래에 별도 source/toolchain/venv를 만들며 기존 SI source를
-갱신하지 않는다. `west.yml`이 Zephyr revision을 고정하고 build script가 compiler
-archive checksum을 검사한다. compiler는 별도 TriCore GCC 11.3.1이다. 이전
-bare-metal probe의 GCC 9.4는 오래된 linker 때문에 이 Zephyr 빌드에 사용하지 않는다.
-설정·compiler·ELF hash는 `app/vmcu-build.json`에 기록한다.
+기본 ELF는 Yocto deploy image 디렉터리의 `zephyr-vmcu-tc397.elf`다.
+`meta-hsoc-auto-solutions`의 `zephyr-vmcu` recipe가 기존 `../zephyr`를
+빌드 작업 디렉터리에 복사하고 `compat/zephyr-4.1.patch`를 적용한다.
+공유 Zephyr checkout은 수정하지 않는다. 별도 Zephyr 다운로드, west workspace,
+호스트 Python venv는 필요하지 않으며 TriCore GCC와 Python 의존성도 Yocto가 관리한다.
+QEMU는 `hsoc-stack/tools/qemu`의 `qemu-apollo-native` 산출물을 사용한다.
+포트의 원본 revision과 변경 범위는 [호환성 설명](compat/README.md)에 기록한다.
 
 QEMU는 현재 workspace의 `KIT_AURIX_TC397B_TRB`, ASCLIN0/1/2, PORT0 GPIO와 M_CAN이 필요하다.
 이전 UART-only binary를 사용하는 경우 현재 QEMU source를 다시 빌드한다.
@@ -94,8 +93,7 @@ PMIC rail sequencing, SC7와 SoC 전체 cold-off는 미지원이다.
 - `tools/`: Apollo Linux용 `vmcu-ap`와 host 검사.
 - `samples/bringup/`: kernel/shell/timer 기초 검증용 application.
 
-root repository가 이 overlay를 소유한다. 빌드 source/dependency와 산출물은
-`build/qbox-apollo-qvp/zephyr-vmcu/` 아래에만 생성한다.
+이 overlay는 독립 Git submodule이며 빌드 산출물은 Yocto WORKDIR와 deploy 디렉터리에 생성한다.
 
 ## 라이선스
 

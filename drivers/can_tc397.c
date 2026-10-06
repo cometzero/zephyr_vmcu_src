@@ -2,7 +2,7 @@
 #define DT_DRV_COMPAT infineon_tc397_mcan
 #include <zephyr/drivers/can.h>
 #include <zephyr/irq.h>
-#include "can_mcan.h"
+#include <zephyr/drivers/can/can_mcan.h>
 
 /* TC3xx groups interrupts in GRINT1/2 instead of implementing ILS/ILE.
  * The common backend's logical line enables are applied to the physical IE.
@@ -107,6 +107,6 @@ static const struct tc397_config custom = {
 static struct tc397_data custom_data;
 CAN_MCAN_DT_INST_CALLBACKS_DEFINE(0, callbacks);
 static const struct can_mcan_config config = CAN_MCAN_DT_CONFIG_INST_GET(0, &custom, &ops, &callbacks);
-CAN_MCAN_DATA_DEFINE(data, &custom_data);
+static struct can_mcan_data data = CAN_MCAN_DATA_INITIALIZER(&custom_data);
 CAN_DEVICE_DT_INST_DEFINE(0, init, NULL, &data, &config,
                           POST_KERNEL, CONFIG_CAN_INIT_PRIORITY, &api);

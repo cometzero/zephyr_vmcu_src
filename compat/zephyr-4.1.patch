@@ -1,0 +1,162 @@
+Subject: [PATCH] zephyr: connect out-of-tree TriCore port to 4.1 core
+
+Upstream-Status: Inappropriate [workspace shared Zephyr 4.1 compatibility]
+
+Dispatch the external architecture, select its GCC ABI flags and backport
+the shell bitfield layout required by the TriCore ABI. Applied only to a
+disposable vMCU build copy, never to the shared Safety Island checkout.
+
+diff --git a/cmake/compiler/gcc/target.cmake b/cmake/compiler/gcc/target.cmake
+index f2f6a96e369b..ed01e00752ad 100644
+--- a/cmake/compiler/gcc/target.cmake
++++ b/cmake/compiler/gcc/target.cmake
+@@ -77,6 +77,8 @@ elseif("${ARCH}" STREQUAL "sparc")
+   include(${CMAKE_CURRENT_LIST_DIR}/target_sparc.cmake)
+ elseif("${ARCH}" STREQUAL "mips")
+   include(${CMAKE_CURRENT_LIST_DIR}/target_mips.cmake)
++elseif("${ARCH}" STREQUAL "tricore")
++  include(${ZEPHYR_ZEPHYR_VMCU_SRC_MODULE_DIR}/cmake/target_tricore.cmake)
+ elseif("${ARCH}" STREQUAL "xtensa")
+   include(${CMAKE_CURRENT_LIST_DIR}/target_xtensa.cmake)
+ endif()
+diff --git a/include/zephyr/arch/arch_inlines.h b/include/zephyr/arch/arch_inlines.h
+index 0f32159e2f1b..b3e4cc6685fe 100644
+--- a/include/zephyr/arch/arch_inlines.h
++++ b/include/zephyr/arch/arch_inlines.h
+@@ -30,6 +30,8 @@
+ #include <zephyr/arch/mips/arch_inlines.h>
+ #elif defined(CONFIG_ARCH_POSIX)
+ #include <zephyr/arch/posix/arch_inlines.h>
++#elif defined(CONFIG_TRICORE)
++#include <zephyr/arch/tricore/arch_inlines.h>
+ #elif defined(CONFIG_SPARC)
+ #include <zephyr/arch/sparc/arch_inlines.h>
+ #endif
+diff --git a/include/zephyr/arch/cpu.h b/include/zephyr/arch/cpu.h
+index 1e107512fa2a..7b0b97f8b21e 100644
+--- a/include/zephyr/arch/cpu.h
++++ b/include/zephyr/arch/cpu.h
+@@ -29,6 +29,8 @@
+ #include <zephyr/arch/mips/arch.h>
+ #elif defined(CONFIG_ARCH_POSIX)
+ #include <zephyr/arch/posix/arch.h>
++#elif defined(CONFIG_TRICORE)
++#include <zephyr/arch/tricore/arch.h>
+ #elif defined(CONFIG_SPARC)
+ #include <zephyr/arch/sparc/arch.h>
+ #endif
+diff --git a/include/zephyr/arch/structs.h b/include/zephyr/arch/structs.h
+index 703ec81f889c..ec13d3090b1b 100644
+--- a/include/zephyr/arch/structs.h
++++ b/include/zephyr/arch/structs.h
+@@ -29,6 +29,8 @@
+ #include <zephyr/arch/riscv/structs.h>
+ #elif defined(CONFIG_ARM)
+ #include <zephyr/arch/arm/structs.h>
++#elif defined(CONFIG_TRICORE)
++#include <zephyr/arch/tricore/structs.h>
+ #else
+ 
+ /* Default definitions when no architecture specific definitions exist. */
+diff --git a/include/zephyr/linker/linker-tool-gcc.h b/include/zephyr/linker/linker-tool-gcc.h
+index 32319a41543a..72740e394948 100644
+--- a/include/zephyr/linker/linker-tool-gcc.h
++++ b/include/zephyr/linker/linker-tool-gcc.h
+@@ -59,6 +59,8 @@
+ 	/* Not needed */
+ #elif defined(CONFIG_SPARC)
+ 	OUTPUT_FORMAT("elf32-sparc")
++#elif defined(CONFIG_TRICORE)
++	OUTPUT_FORMAT("elf32-tricore")
+ #else
+ 	#error Arch not supported.
+ #endif
+diff --git a/include/zephyr/shell/shell.h b/include/zephyr/shell/shell.h
+index 5115e35339be..adc22dd8d1d6 100644
+--- a/include/zephyr/shell/shell.h
++++ b/include/zephyr/shell/shell.h
+@@ -773,6 +773,7 @@ struct shell_backend_config_flags {
+ 	uint32_t mode_delete :1; /*!< Operation mode of backspace key */
+ 	uint32_t use_colors  :1; /*!< Controls colored syntax */
+ 	uint32_t use_vt100   :1; /*!< Controls VT100 commands usage in shell */
++	uint32_t _reserved   :26;
+ };
+ 
+ BUILD_ASSERT((sizeof(struct shell_backend_config_flags) == sizeof(uint32_t)),
+@@ -792,14 +793,15 @@ BUILD_ASSERT((sizeof(struct shell_backend_config_flags) == sizeof(uint32_t)),
+ };
+ 
+ struct shell_backend_ctx_flags {
++	uint32_t last_nl      :8; /*!< Last received new line character */
+ 	uint32_t processing   :1; /*!< Shell is executing process function */
+ 	uint32_t tx_rdy       :1;
+ 	uint32_t history_exit :1; /*!< Request to exit history mode */
+-	uint32_t last_nl      :8; /*!< Last received new line character */
+ 	uint32_t cmd_ctx      :1; /*!< Shell is executing command */
+ 	uint32_t print_noinit :1; /*!< Print request from not initialized shell */
+ 	uint32_t sync_mode    :1; /*!< Shell in synchronous mode */
+ 	uint32_t handle_log   :1; /*!< Shell is handling logger backend */
++	uint32_t _reserved    :17;
+ };
+ 
+ BUILD_ASSERT((sizeof(struct shell_backend_ctx_flags) == sizeof(uint32_t)),
+diff --git a/include/zephyr/toolchain/common.h b/include/zephyr/toolchain/common.h
+index c84328365fd3..186436dbd8f1 100644
+--- a/include/zephyr/toolchain/common.h
++++ b/include/zephyr/toolchain/common.h
+@@ -92,7 +92,7 @@
+ 
+   #elif defined(CONFIG_ARCH_POSIX)
+ 
+-  #elif defined(CONFIG_SPARC)
++  #elif defined(CONFIG_SPARC) || defined(CONFIG_TRICORE)
+ 
+     #define PERFOPT_ALIGN .align  4
+ 
+diff --git a/include/zephyr/toolchain/gcc.h b/include/zephyr/toolchain/gcc.h
+index e003cd2c26f7..4e9ad065b7dd 100644
+--- a/include/zephyr/toolchain/gcc.h
++++ b/include/zephyr/toolchain/gcc.h
+@@ -133,6 +133,17 @@
+ #endif
+ 
+ /* Unaligned access */
++#ifdef CONFIG_TRICORE
++#define UNALIGNED_GET(g)                                                                           \
++	__extension__({                                                                            \
++		union {                                                                            \
++			__typeof__(*(g)) __v;                                                      \
++			unsigned char __b[sizeof(__typeof__(*(g)))];                               \
++		} __u = {0};                                                                       \
++		__builtin_memcpy(__u.__b, (const void *)(g), sizeof(__u.__b));                     \
++		__u.__v;                                                                           \
++	})
++#else
+ #define UNALIGNED_GET(g)						\
+ __extension__ ({							\
+ 	struct  __attribute__((__packed__)) {				\
+@@ -140,6 +151,7 @@ __extension__ ({							\
+ 	} *__g = (__typeof__(__g)) (g);					\
+ 	__g->__v;							\
+ })
++#endif
+ 
+ 
+ #if (__GNUC__ >= 7) && (defined(CONFIG_ARM) || defined(CONFIG_ARM64))
+@@ -587,6 +599,16 @@ do {                                                                    \
+ 		"\n\t.equ\t" #name "," #value       \
+ 		"\n\t.type\t" #name ",#object")
+ 
++#elif defined(CONFIG_TRICORE)
++#define GEN_ABSOLUTE_SYM(name, value)			\
++	__asm__(".global\t" #name "\n\t.equ\t" #name	\
++		",%0"					\
++		"\n\t.type\t" #name ",@object" : : "n"(value))
++
++#define GEN_ABSOLUTE_SYM_KCONFIG(name, value)       \
++	__asm__(".globl\t" #name                    \
++		"\n\t.equ\t" #name "," #value       \
++		"\n\t.type\t" #name ",@object")
+ #else
+ #error processor architecture not supported
+ #endif
