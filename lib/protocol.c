@@ -47,7 +47,7 @@ void vmcu_encode(uint8_t bytes[VMCU_FRAME_SIZE], const struct vmcu_frame *frame)
 bool vmcu_decode(const uint8_t bytes[VMCU_FRAME_SIZE], struct vmcu_frame *frame)
 {
     if (bytes[0] != 0xa5 || bytes[1] != 0x5a || bytes[2] != VMCU_VERSION ||
-        bytes[3] < VMCU_HELLO || bytes[3] > VMCU_SAFETY_HEALTH ||
+        bytes[3] < VMCU_HELLO || bytes[3] > VMCU_SPI_SYNC ||
         bytes[4] != VMCU_FRAME_SIZE || bytes[5] != 0 ||
         (bytes[6] != VMCU_AP && bytes[6] != VMCU_MCU && bytes[6] != VMCU_SI0) ||
         get32(bytes + 24) != vmcu_crc32(bytes, 24)) {

@@ -8,4 +8,8 @@ config CAN_TC397
     default y
     depends on CAN
     select CAN_MCAN
+config VMCU_SAFETY_SPI
+    bool "Use QSPI0 for SI safety transport"
+    default n
+    select SPI
 source "Kconfig.zephyr"

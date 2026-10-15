@@ -6,3 +6,7 @@ target_include_directories(app PRIVATE include)
 target_sources(app PRIVATE src/main.c lib/protocol.c lib/safety.c)
 target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/can)
 target_sources(app PRIVATE drivers/can_tc397.c src/vehicle_can.c lib/can_policy.c)
+
+if(CONFIG_VMCU_SAFETY_SPI)
+  target_sources(app PRIVATE drivers/spi_tc397.c)
+endif()

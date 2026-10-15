@@ -1,0 +1,6 @@
+description: Infineon TC397 QSPI master functional subset
+compatible: "infineon,tc397-qspi"
+include: spi-controller.yaml
+properties:
+  reg:
+    required: true

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/shell/shell_uart.h>
@@ -61,6 +62,32 @@ static void transmit(const struct device *uart, const struct vmcu_frame *frame)
     }
 }
 
+#ifdef CONFIG_VMCU_SAFETY_SPI
+static const struct device *const spi_link = DEVICE_DT_GET(DT_NODELABEL(qspi0));
+static const struct spi_config spi_config = { .frequency = 1000000, .operation = SPI_WORD_SET(8) };
+static bool spi_synced, spi_level;
+static uint32_t spi_retry, spi_reads, spi_acks, spi_errors, spi_requests, spi_activity;
+extern uint32_t vmcu_spi_irq_count(const struct device *dev);
+static int spi_frame(const struct vmcu_frame *out, struct vmcu_frame *in)
+{
+    uint8_t tx[VMCU_FRAME_SIZE] = { 0 }, rx[VMCU_FRAME_SIZE];
+    if (out) { vmcu_encode(tx, out); }
+    struct spi_buf tb = { .buf = tx, .len = sizeof(tx) };
+    struct spi_buf rb = { .buf = rx, .len = sizeof(rx) };
+    struct spi_buf_set ts = { .buffers = &tb, .count = 1 };
+    struct spi_buf_set rs = { .buffers = &rb, .count = 1 };
+    int rc = spi_transceive(spi_link, &spi_config, &ts, &rs);
+    if (!rc && in && !vmcu_decode(rx, in)) {
+        bool filler = true;
+        for (unsigned i = 0; i < sizeof(rx); i++) { filler &= rx[i] == 0xff || rx[i] == 0; }
+        if (filler) { return -ENODATA; }
+        rc = -EBADMSG;
+    }
+    if (rc) { spi_errors++; spi_synced = false; spi_retry = k_uptime_get_32() + 100; }
+    return rc;
+}
+#endif
+
 static void receive(const struct vmcu_frame *frame, uint8_t peer, uint32_t now)
 {
     uint32_t epoch = peer == VMCU_SI0 ? safety.epoch : ap_epoch;
@@ -90,6 +117,39 @@ static void receive(const struct vmcu_frame *frame, uint8_t peer, uint32_t now)
     /* AP HEALTH is deliberately not an input to the safety decision. */
 }
 
+#ifdef CONFIG_VMCU_SAFETY_SPI
+static void spi_received(const struct vmcu_frame *frame, uint32_t now, bool request_seen)
+{
+    if (frame->sender != VMCU_SI0) { return; }
+    if (!request_seen) {
+        uint32_t deadline = k_uptime_get_32() + 1000;
+        /* ACK must not release the retained toggle before GPIO transport sees it. */
+        while (!!(sys_read32(PORT0 + PORT_IN) & BIT(5)) == spi_level) {
+            if ((int32_t)(k_uptime_get_32() - deadline) >= 0) {
+                spi_errors++;
+                spi_synced = false;
+                spi_retry = k_uptime_get_32() + 100;
+                printk("VMCU_SPI error=request-timeout sequence=%u\n", frame->sequence);
+                return;
+            }
+            k_sleep(K_MSEC(1));
+        }
+        spi_level = !spi_level;
+        spi_requests++;
+        spi_activity = k_uptime_get_32();
+    }
+    receive(frame, VMCU_SI0, now);
+    spi_reads++;
+    struct vmcu_frame ack = { .type = VMCU_SPI_ACK, .sender = VMCU_MCU,
+        .epoch = frame->epoch, .sequence = frame->sequence, .progress = frame->type };
+    if (!spi_frame(&ack, NULL)) {
+        spi_acks++;
+        printk("VMCU_SPI rx=%u ack=%u errors=%u epoch=%u sequence=%u type=%u\n",
+               spi_reads, spi_acks, spi_errors, frame->epoch, frame->sequence, frame->type);
+    }
+}
+#endif
+
 static void link_worker(void *unused1, void *unused2, void *unused3)
 {
     struct vmcu_stream streams[2] = { 0 };
@@ -97,7 +157,13 @@ static void link_worker(void *unused1, void *unused2, void *unused3)
     const uint8_t peer[] = { VMCU_AP, VMCU_SI0 };
     unsigned previous_state = SAFETY_WAIT, previous_fault = SAFETY_NONE;
     ARG_UNUSED(unused1); ARG_UNUSED(unused2); ARG_UNUSED(unused3);
-    if (!device_is_ready(ap_link) || !device_is_ready(safety_link)) {
+    if (!device_is_ready(ap_link) ||
+#ifdef CONFIG_VMCU_SAFETY_SPI
+        !device_is_ready(spi_link)
+#else
+        !device_is_ready(safety_link)
+#endif
+        ) {
         printk("VMCU_INIT result=FAIL reason=uart-not-ready\n");
         return;
     }
@@ -107,7 +173,11 @@ static void link_worker(void *unused1, void *unused2, void *unused3)
     sys_write32(GPIO_RESET_N, PORT0 + PORT_OUT);
     sys_write32(0x80100000u, PORT0 + PORT_IOCR0);
     sys_write32(0x00000080u, PORT0 + PORT_IOCR4);
+#ifdef CONFIG_VMCU_SAFETY_SPI
+    printk("VMCU_INIT result=PASS shell=ASCLIN1 management=ASCLIN0 safety=QSPI0 period_ms=5000\n");
+#else
     printk("VMCU_INIT result=PASS shell=ASCLIN1 management=ASCLIN0 safety=ASCLIN2 period_ms=5000\n");
+#endif
     printk("VMCU_STATE source=SI0_PFDI state=WAIT fault=NONE epoch=0\n");
     for (;;) {
         uint32_t now = k_uptime_get_32();
@@ -116,6 +186,9 @@ static void link_worker(void *unused1, void *unused2, void *unused3)
         bool announce = false;
         k_mutex_lock(&state_lock, K_FOREVER);
         for (unsigned channel = 0; channel < ARRAY_SIZE(uart); channel++) {
+#ifdef CONFIG_VMCU_SAFETY_SPI
+            if (channel == 1) { continue; }
+#endif
             unsigned char byte;
             struct vmcu_frame frame;
             for (unsigned i = 0; i < 128 && uart_poll_in(uart[channel], &byte) == 0; i++) {
@@ -124,6 +197,28 @@ static void link_worker(void *unused1, void *unused2, void *unused3)
                 }
             }
         }
+#ifdef CONFIG_VMCU_SAFETY_SPI
+        if (spi_synced && now - spi_activity > 6000) { spi_synced = false; }
+        bool level = !!(sys_read32(PORT0 + PORT_IN) & BIT(5));
+        if (!spi_synced && (int32_t)(now - spi_retry) >= 0) {
+            struct vmcu_frame sync = { .type = VMCU_SPI_SYNC, .sender = VMCU_MCU };
+            spi_level = level;
+            if (!spi_frame(&sync, NULL)) {
+                spi_synced = true;
+                spi_activity = now;
+                printk("VMCU_SPI sync=sent\n");
+            }
+        } else if (spi_synced && level != spi_level) {
+            struct vmcu_frame frame;
+            spi_level = level;
+            spi_requests++;
+            spi_activity = now;
+            int rc = spi_frame(NULL, &frame);
+            if (!rc) { spi_received(&frame, now, true); }
+            else if (rc == -ENODATA) { spi_synced = false; }
+
+        }
+#endif
         vmcu_safety_gpio(&safety, (sys_read32(PORT0 + PORT_IN) & BIT(0)) != 0, now);
         vmcu_safety_tick(&safety, now);
         if (safety.state != previous_state || safety.reason != previous_fault) {
@@ -137,7 +232,16 @@ static void link_worker(void *unused1, void *unused2, void *unused3)
             (!request.guard || (request.guard == safety.epoch &&
              now - safety.received_ms < VMCU_SAFETY_DEADLINE_MS)) && request.frame.epoch ==
             (request.peer == VMCU_SI0 ? safety.epoch : ap_epoch)) {
-            transmit(request.peer == VMCU_SI0 ? safety_link : ap_link, &request.frame);
+#ifdef CONFIG_VMCU_SAFETY_SPI
+            if (request.peer == VMCU_SI0) {
+                k_sleep(K_MSEC(20));
+                struct vmcu_frame incoming;
+                if (!spi_frame(&request.frame, &incoming)) {
+                    spi_received(&incoming, now, false);
+                }
+            } else
+#endif
+            { transmit(request.peer == VMCU_SI0 ? safety_link : ap_link, &request.frame); }
         }
         k_mutex_unlock(&state_lock);
         if (announce) {
@@ -272,6 +376,13 @@ static int rpc(const struct shell *shell, uint8_t peer, uint32_t operation, uint
 
 static int command(const struct shell *shell, size_t argc, char **argv)
 {
+#ifdef CONFIG_VMCU_SAFETY_SPI
+    if (argc == 3 && !strcmp(argv[1], "spi") && !strcmp(argv[2], "status")) {
+        shell_print(shell, "VMCU_SPI_STATUS frames=%u ack=%u irq=%u req=%u failures=%u",
+                    spi_reads, spi_acks, vmcu_spi_irq_count(spi_link), spi_requests, spi_errors);
+        return 0;
+    }
+#endif
     if (argc >= 2 && !strcmp(argv[1], "can")) {
         return vmcu_can_shell(shell, argc - 2, argv + 2);
     }

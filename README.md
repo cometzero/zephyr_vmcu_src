@@ -99,3 +99,31 @@ PMIC rail sequencing, SC7와 SoC 전체 cold-off는 미지원이다.
 
 파일별 SPDX 식별자를 따른다. 애플리케이션·프로토콜은 GPL-2.0-or-later,
 Zephyr 통합 설정·드라이버·bringup sample은 Apache-2.0이며 원문은 `LICENSES/`에 있다.
+
+## QSPI safety profile
+
+`CONFIG_VMCU_SAFETY_SPI=y` selects QSPI0 instead of ASCLIN2; UART remains the
+build default. QSPI0 uses `0xf0001c00`, RX SRC `0x3d`, error SRC `0x3e`, mode 0,
+8-bit MSB-first, CS0, 1 MHz nominal configuration. The driver uses the Zephyr SPI
+API and PIO with an RX/error interrupt per byte. Four-entry hardware FIFOs are
+not enlarged by the socket transport. Clock segments are separated by remote
+completion and guest IRQ handling; this is functional SPI, not continuous SCLK.
+
+PORT0 pin5 is the SI request toggle. The link worker polls at 1 ms, sends SYNC
+at startup and after six seconds of inactivity, reads a 28-byte frame, validates
+its CRC, and sends ACK with epoch/sequence/original type. Commands also inspect
+simultaneously received MISO, so queued safety reports are not discarded.
+All-zero/all-ones idle MISO is distinct from a corrupt application frame.
+`vmcu-cli spi status` reports frames, acknowledgements, controller IRQs, observed
+request toggles and failures. No automatic UART fallback is performed.
+
+Controller layout is grounded in Infineon TC39x-B iLLD revision
+`ac8fb805633894b89819b953516b4e94387056fd`, `IfxQspi_reg.h`,
+`IfxQspi_regdef.h`, `IfxSrc_reg.h` and `IfxQspi.h`. DMA, other SPI formats,
+ERU interrupt routing and physical timing are unsupported.
+
+Focused guest test (host SI fixture, not Apollo integration evidence):
+
+```sh
+python3 tests/test_spi_guest.py /path/to/qemu-system-tricore /path/to/spi/zephyr.elf
+```
